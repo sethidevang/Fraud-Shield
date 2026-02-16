@@ -5,6 +5,7 @@ Run train_model.py once to create model.pkl and feature_columns.pkl, then: flask
 import os
 import pandas as pd
 import joblib
+import json
 from flask import Flask, render_template, request, jsonify
 
 app = Flask(__name__)
@@ -12,7 +13,7 @@ app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "model.pkl")
 COLS_PATH = os.path.join(BASE_DIR, "feature_columns.pkl")
-DATA_PATH = os.path.join(BASE_DIR, "transactions.csv")
+STATS_PATH = os.path.join(BASE_DIR, "stats.json")
 
 model = None
 feature_columns = None
@@ -54,26 +55,12 @@ def index():
         return render_template("index.html", model_loaded=False, stats=None)
 
     stats = None
-    if os.path.isfile(DATA_PATH):
-        df = pd.read_csv(DATA_PATH)
-        total = len(df)
-        fraud_count = int(df["is_fraud"].sum()) if "is_fraud" in df.columns else 0
-        fraud_rate = (df["is_fraud"].mean() * 100) if "is_fraud" in df.columns else 0
-        legitimate_count = total - fraud_count
-        countries_series = df["country"].value_counts().head(10) if "country" in df.columns else pd.Series()
-        channels_series = df["channel"].value_counts() if "channel" in df.columns else pd.Series()
-        stats = {
-            "total_transactions": int(total),
-            "fraud_count": int(fraud_count),
-            "legitimate_count": int(legitimate_count),
-            "fraud_rate_pct": round(fraud_rate, 2),
-            "countries": countries_series.to_dict(),
-            "channels": channels_series.to_dict(),
-            "country_labels": [str(x) for x in countries_series.index],
-            "country_values": [int(x) for x in countries_series.values],
-            "channel_labels": [str(x) for x in channels_series.index],
-            "channel_values": [int(x) for x in channels_series.values],
-        }
+    if os.path.isfile(STATS_PATH):
+        try:
+            with open(STATS_PATH, 'r') as f:
+                stats = json.load(f)
+        except Exception as e:
+            print(f"Error loading stats: {e}")
 
     return render_template("index.html", model_loaded=True, stats=stats)
 

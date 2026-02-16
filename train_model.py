@@ -53,13 +53,40 @@ def main():
 
     model_path = os.path.join(base_dir, "model.pkl")
     cols_path = os.path.join(base_dir, "feature_columns.pkl")
+    stats_path = os.path.join(base_dir, "stats.json")
 
     print(f"Saving model with compression...")
     joblib.dump(model, model_path, compress=3)
     joblib.dump(feature_columns, cols_path)
 
+    print("Generating dashboard stats...")
+    import json
+    total = len(df)
+    fraud_count = int(df["is_fraud"].sum()) if "is_fraud" in df.columns else 0
+    fraud_rate = (df["is_fraud"].mean() * 100) if "is_fraud" in df.columns else 0
+    legitimate_count = total - fraud_count
+    countries_series = df["country"].value_counts().head(10) if "country" in df.columns else pd.Series()
+    channels_series = df["channel"].value_counts() if "channel" in df.columns else pd.Series()
+    
+    stats = {
+        "total_transactions": int(total),
+        "fraud_count": int(fraud_count),
+        "legitimate_count": int(legitimate_count),
+        "fraud_rate_pct": round(fraud_rate, 2),
+        "countries": countries_series.to_dict(),
+        "channels": channels_series.to_dict(),
+        "country_labels": [str(x) for x in countries_series.index],
+        "country_values": [int(x) for x in countries_series.values],
+        "channel_labels": [str(x) for x in channels_series.index],
+        "channel_values": [int(x) for x in channels_series.values],
+    }
+    
+    with open(stats_path, 'w') as f:
+        json.dump(stats, f)
+
     print(f"Model saved to {model_path}")
-    print(f"Feature columns ({len(feature_columns)}) saved to {cols_path}")
+    print(f"Feature columns saved to {cols_path}")
+    print(f"Stats saved to {stats_path}")
 
 
 if __name__ == "__main__":
