@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% block title %}Check transaction{% endblock %}
+{% block head %}
+  <style>
+    .form-section { margin-bottom: 2rem; }
+    .form-section-title { font-size: 1rem; font-weight: 600; color: var(--text); margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
+    .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .form-grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+    @media (max-width: 600px) {
+      .form-grid-2, .form-grid-4 { grid-template-columns: 1fr; }
+    }
+    .result-card {
+      padding: 1.75rem;
+      border-radius: var(--radius);
+      margin-bottom: 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 1.25rem;
+      flex-wrap: wrap;
+    }
+    .result-card.fraud { background: var(--danger-muted); border: 1px solid rgba(240, 68, 56, 0.4); }
+    .result-card.legitimate { background: var(--success-muted); border: 1px solid rgba(18, 183, 106, 0.4); }
+    .result-icon { width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .result-card.fraud .result-icon { background: rgba(240, 68, 56, 0.25); color: var(--danger); }
+    .result-card.legitimate .result-icon { background: rgba(18, 183, 106, 0.25); color: var(--success); }
+    .result-label { font-size: 1.25rem; font-weight: 700; }
+    .result-card.fraud .result-label { color: var(--danger); }
+    .result-card.legitimate .result-label { color: var(--success); }
+    .risk-meter-wrap { flex: 1; min-width: 180px; }
+    .risk-meter-bar { height: 8px; background: var(--surface); border-radius: 4px; overflow: hidden; margin-top: 0.5rem; }
+    .risk-meter-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
+    .risk-meter-fill.low { background: var(--success); }
+    .risk-meter-fill.medium { background: var(--warning); }
+    .risk-meter-fill.high { background: var(--danger); }
+    .btn-loading { position: relative; color: transparent !important; }
+    .btn-loading::after { content: ''; position: absolute; width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.4); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+{% endblock %}
+{% block content %}
+  {% if not model_loaded %}
+    <div class="alert alert-warning">
+      <span aria-hidden="true">⚠️</span>
+      <div>
+        <strong>Model not loaded.</strong> Run <code class="mono">python train_model.py</code> in the Fraud folder, then restart the app.
+      </div>
+    </div>
+  {% else %}
+    <div class="page-header" style="margin-bottom: 1.5rem;">
+      <h1 style="font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em;">Check transaction</h1>
+      <p class="muted" style="margin-top: 0.25rem;">Enter transaction details to get a fraud risk score</p>
+    </div>
+
+    {% if error %}
+      <div class="alert alert-danger">
+        <span aria-hidden="true">✕</span>
+        <div>{{ error }}</div>
+      </div>
+    {% endif %}
+
+    {% if result %}
+      <div class="result-card {{ 'fraud' if result.raw == 1 else 'legitimate' }}" role="status">
+        <div class="result-icon" aria-hidden="true">
+          {% if result.raw == 1 %}
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          {% else %}
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          {% endif %}
+        </div>
+        <div>
+          <div class="result-label">{{ result.label }}</div>
+          <div class="muted" style="font-size: 0.85rem;">Fraud probability</div>
+        </div>
+        <div class="risk-meter-wrap">
+          <div class="muted" style="font-size: 0.85rem;">Risk score: <strong style="color: var(--text);">{{ result.fraud_probability }}%</strong></div>
+          <div class="risk-meter-bar">
+            <div class="risk-meter-fill {{ 'high' if result.fraud_probability >= 50 else 'medium' if result.fraud_probability >= 20 else 'low' }}" style="width: {{ result.fraud_probability }}%;"></div>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+
+    <div class="card">
+      <form method="post" action="{{ url_for('predict') }}" id="predictForm" novalidate>
+        <div class="form-section">
+          <div class="form-section-title">Transaction details</div>
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label for="account_age_days">Account age (days)</label>
+              <input type="number" id="account_age_days" name="account_age_days" placeholder="e.g. 100" min="0">
+            </div>
+            <div class="form-group">
+              <label for="total_transactions_user">Total transactions (user)</label>
+              <input type="number" id="total_transactions_user" name="total_transactions_user" placeholder="e.g. 20" min="0">
+            </div>
+            <div class="form-group">
+              <label for="avg_amount_user">Avg amount (user)</label>
+              <input type="number" id="avg_amount_user" name="avg_amount_user" step="0.01" placeholder="e.g. 100.00" min="0">
+            </div>
+            <div class="form-group">
+              <label for="amount">Amount <span style="color: var(--danger);">*</span></label>
+              <input type="number" id="amount" name="amount" step="0.01" placeholder="e.g. 50.00" min="0" required>
+            </div>
+            <div class="form-group">
+              <label for="shipping_distance_km">Shipping distance (km)</label>
+              <input type="number" id="shipping_distance_km" name="shipping_distance_km" step="0.01" placeholder="e.g. 10.50" min="0">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Location & channel</div>
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label for="country">Country</label>
+              <select id="country" name="country">
+                {% for c in ['FR','US','TR','PL','ES','IT','RO','GB','NL','DE'] %}
+                  <option value="{{ c }}" {{ 'selected' if request.form.get('country') == c else '' }}>{{ c }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="bin_country">BIN country</label>
+              <select id="bin_country" name="bin_country">
+                {% for c in ['FR','US','RO','ES','TR','DE','GB','IT','PL','NL'] %}
+                  <option value="{{ c }}" {{ 'selected' if request.form.get('bin_country') == c else '' }}>{{ c }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="channel">Channel</label>
+              <select id="channel" name="channel">
+                <option value="web" {{ 'selected' if request.form.get('channel') == 'web' else '' }}>Web</option>
+                <option value="app" {{ 'selected' if request.form.get('channel') == 'app' else '' }}>App</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="merchant_category">Merchant category</label>
+              <select id="merchant_category" name="merchant_category">
+                {% for m in ['travel','fashion','electronics','grocery','gaming'] %}
+                  <option value="{{ m }}" {{ 'selected' if request.form.get('merchant_category') == m else '' }}>{{ m | capitalize }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Security flags</div>
+          <div class="form-grid-4">
+            <div class="form-group">
+              <label for="promo_used">Promo used</label>
+              <select id="promo_used" name="promo_used">
+                <option value="0" {{ 'selected' if request.form.get('promo_used') == '0' else '' }}>No</option>
+                <option value="1" {{ 'selected' if request.form.get('promo_used') == '1' else '' }}>Yes</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="avs_match">AVS match</label>
+              <select id="avs_match" name="avs_match">
+                <option value="0" {{ 'selected' if request.form.get('avs_match') == '0' else '' }}>No</option>
+                <option value="1" {{ 'selected' if request.form.get('avs_match') == '1' else '' }}>Yes</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="cvv_result">CVV result</label>
+              <select id="cvv_result" name="cvv_result">
+                <option value="0" {{ 'selected' if request.form.get('cvv_result') == '0' else '' }}>No</option>
+                <option value="1" {{ 'selected' if request.form.get('cvv_result') == '1' else '' }}>Yes</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="three_ds_flag">3DS flag</label>
+              <select id="three_ds_flag" name="three_ds_flag">
+                <option value="0" {{ 'selected' if request.form.get('three_ds_flag') == '0' else '' }}>No</option>
+                <option value="1" {{ 'selected' if request.form.get('three_ds_flag') == '1' else '' }}>Yes</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Timestamp</div>
+          <div class="form-group" style="max-width: 320px;">
+            <label for="transaction_time">Transaction time (ISO 8601)</label>
+            <input type="text" id="transaction_time" name="transaction_time" placeholder="e.g. 2024-01-15T12:00:00Z">
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary" id="submitBtn">
+          Run risk check
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+      </form>
+    </div>
+
+    <script>
+      document.getElementById('predictForm').addEventListener('submit', function() {
+        var btn = document.getElementById('submitBtn');
+        btn.disabled = true;
+        btn.classList.add('btn-loading');
+      });
+    </script>
+  {% endif %}
+{% endblock %}

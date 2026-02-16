@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block head %}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    @media (max-width: 700px) {
+      .charts-row { grid-template-columns: 1fr !important; }
+      .kpi-grid { grid-template-columns: 1fr 1fr !important; }
+    }
+  </style>
+{% endblock %}
+{% block content %}
+  {% if not model_loaded %}
+    <div class="alert alert-warning">
+      <span aria-hidden="true">⚠️</span>
+      <div>
+        <strong>Model not loaded.</strong> Run <code class="mono">python train_model.py</code> in the Fraud folder, then restart the app.
+      </div>
+    </div>
+  {% else %}
+    <div class="card description-panel" style="margin-bottom: 2rem; padding: 1.5rem 1.75rem;">
+      <div class="card-title" style="margin-bottom: 0.75rem;">About this project</div>
+      <p style="color: var(--text-secondary); font-size: 0.95rem; line-height: 1.65; margin-bottom: 1rem;">
+        <strong style="color: var(--text);">Fraud Shield</strong> is a transaction fraud detection system. It uses a machine learning model trained on historical transaction data to score new transactions as <strong style="color: var(--success);">legitimate</strong> or <strong style="color: var(--danger);">fraudulent</strong>, and to show a fraud probability (risk score).
+      </p>
+      <div class="card-title" style="font-size: 0.8rem; margin-bottom: 0.5rem;">How it works</div>
+      <ol style="color: var(--text-secondary); font-size: 0.9rem; line-height: 1.7; margin: 0 0 1rem 1.25rem; padding: 0;">
+        <li><strong style="color: var(--text);">Data</strong> — Transactions are described by amount, user history, country, channel (web/app), merchant category, and security flags (AVS, CVV, 3DS).</li>
+        <li><strong style="color: var(--text);">Features</strong> — Time fields are turned into hour, day, month, and weekend; categories are one-hot encoded so the model can use them.</li>
+        <li><strong style="color: var(--text);">Model</strong> — A Random Forest classifier is trained on the encoded data, with SMOTE used to balance the fraud class. The trained model is saved and loaded by this app.</li>
+        <li><strong style="color: var(--text);">Prediction</strong> — When you submit a transaction in <a href="{{ url_for('predict') }}" style="color: var(--accent);">Check transaction</a>, the same encoding is applied and the model returns a label (Fraud/Legitimate) and a fraud probability.</li>
+      </ol>
+      <p style="color: var(--text-secondary); font-size: 0.9rem; margin: 0;">
+        This <strong style="color: var(--text);">Dashboard</strong> summarizes the training dataset (counts and fraud rate). Use <strong style="color: var(--text);">Check transaction</strong> to score a single transaction in real time.
+      </p>
+    </div>
+
+    {% if stats %}
+      <div class="page-header" style="margin-bottom: 1.75rem;">
+        <h1 style="font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em;">Overview</h1>
+        <p class="muted" style="margin-top: 0.25rem;">Transaction dataset summary and fraud metrics</p>
+      </div>
+
+      <div class="kpi-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+        <div class="card kpi-card" style="border-left: 3px solid var(--accent);">
+          <div class="card-title">Total transactions</div>
+          <div class="kpi-value" data-value="{{ stats.total_transactions }}" style="font-size: 1.75rem; font-weight: 700; font-variant-numeric: tabular-nums;">{{ "{:,}".format(stats.total_transactions) }}</div>
+        </div>
+        <div class="card kpi-card" style="border-left: 3px solid var(--success);">
+          <div class="card-title">Legitimate</div>
+          <div class="kpi-value" style="font-size: 1.75rem; font-weight: 700; color: var(--success); font-variant-numeric: tabular-nums;">{{ "{:,}".format(stats.legitimate_count) }}</div>
+        </div>
+        <div class="card kpi-card" style="border-left: 3px solid var(--danger);">
+          <div class="card-title">Fraud</div>
+          <div class="kpi-value" style="font-size: 1.75rem; font-weight: 700; color: var(--danger); font-variant-numeric: tabular-nums;">{{ "{:,}".format(stats.fraud_count) }}</div>
+        </div>
+        <div class="card kpi-card" style="border-left: 3px solid var(--warning);">
+          <div class="card-title">Fraud rate</div>
+          <div class="kpi-value" style="font-size: 1.75rem; font-weight: 700; color: var(--warning); font-variant-numeric: tabular-nums;">{{ stats.fraud_rate_pct }}%</div>
+        </div>
+      </div>
+
+      <div class="charts-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 2rem;">
+        {% if stats.channel_labels and stats.channel_values %}
+        <div class="card" style="padding: 1.5rem;">
+          <div class="card-title">By channel</div>
+          <div style="height: 240px; position: relative;">
+            <canvas id="chartChannels" aria-label="Transactions by channel"></canvas>
+          </div>
+        </div>
+        {% endif %}
+        {% if stats.country_labels and stats.country_values %}
+        <div class="card" style="padding: 1.5rem;">
+          <div class="card-title">Top countries</div>
+          <div style="height: 240px; position: relative;">
+            <canvas id="chartCountries" aria-label="Transactions by country"></canvas>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+
+      <script>
+        (function() {
+          const accent = '#4f7cf6';
+          const success = '#12b76a';
+          const danger = '#f04438';
+          const colors = [accent, success, '#f79009', '#8b5cf6', '#06b6d4'];
+          const channelLabels = {{ stats.channel_labels | tojson }};
+          const channelValues = {{ stats.channel_values | tojson }};
+          const countryLabels = {{ stats.country_labels | tojson }};
+          const countryValues = {{ stats.country_values | tojson }};
+
+          if (channelLabels.length && document.getElementById('chartChannels')) {
+            new Chart(document.getElementById('chartChannels'), {
+              type: 'doughnut',
+              data: {
+                labels: channelLabels,
+                datasets: [{ data: channelValues, backgroundColor: colors.slice(0, channelLabels.length), borderWidth: 0 }]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { position: 'bottom' } }
+              }
+            });
+          }
+          if (countryLabels.length && document.getElementById('chartCountries')) {
+            new Chart(document.getElementById('chartCountries'), {
+              type: 'bar',
+              data: {
+                labels: countryLabels,
+                datasets: [{ label: 'Transactions', data: countryValues, backgroundColor: accent, borderRadius: 6 }]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                indexAxis: 'y',
+                plugins: { legend: { display: false } },
+                scales: {
+                  x: { grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#9ca3b4' } },
+                  y: { grid: { display: false }, ticks: { color: '#9ca3b4' } }
+                }
+              }
+            });
+          }
+        })();
+      </script>
+    {% else %}
+      <p class="muted">No <code class="mono">transactions.csv</code> found in this folder.</p>
+    {% endif %}
+
+    <div style="margin-top: 1.5rem;">
+      <a href="{{ url_for('predict') }}" class="btn btn-primary">
+        Check a transaction
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </a>
+    </div>
+  {% endif %}
+{% endblock %}
